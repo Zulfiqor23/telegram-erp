@@ -8,9 +8,10 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from supabase import create_client, Client
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InputMediaPhoto, InputMediaDocument
 from aiogram.client.default import DefaultBotProperties
 import logging
+import asyncio
 
 # Logger
 logging.basicConfig(level=logging.INFO)
@@ -21,15 +22,11 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 GROUP_ID = os.getenv("GROUP_ID", "-1003926147374")
 TOPIC_ORDER = os.getenv("TOPIC_ORDER", os.getenv("TOPIC_ASOSIY", ""))
+TOPIC_XONA = os.getenv("TOPIC_XONA", "")
 TOPIC_ZAMER = os.getenv("TOPIC_ZAMER", "")
 TOPIC_DIZAYN = os.getenv("TOPIC_DIZAYN", "")
 TOPIC_PRODUCTION = os.getenv("TOPIC_ISHLAB_CHIQARISH", "")
 TOPIC_DONE = os.getenv("TOPIC_DONE", "")
-
-def get_media_thread(media_type: str):
-    if media_type in ("zamer", "xona") and TOPIC_ZAMER: return int(TOPIC_ZAMER)
-    if media_type in ("dizayn", "smeta") and TOPIC_DIZAYN: return int(TOPIC_DIZAYN)
-    return int(TOPIC_ORDER) if TOPIC_ORDER else None
 
 # Initialize Supabase
 supabase: Client = None
@@ -41,29 +38,36 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 
-# FastAPI App
 app = FastAPI()
 
-# States
 class OrderForm(StatesGroup):
     name = State()
     phone = State()
     location = State()
-    items = State()
+    categories = State()
+    xona_photos = State()
+    measurements = State()
+    design_photos = State()
+    deadline = State()
+    password = State()
 
-class MediaUpload(StatesGroup):
-    waiting_for_media = State()
+def skip_kb():
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="⏭ O'tkazib yuborish"), KeyboardButton(text="➡️ Davom etish")]], resize_keyboard=True)
 
-# ----------------- /start -----------------
+def next_kb():
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➡️ Davom etish")]], resize_keyboard=True)
+
 @router.message(CommandStart())
 async def start_cmd(message: types.Message):
-    await message.answer("Assalomu alaykum, Maryam Mebel botiga xush kelibsiz!\nBuyurtma berish uchun /new_order buyrug'ini bosing.")
+    await message.answer("Assalomu alaykum, Maryam Mebel botiga xush kelibsiz!\nBuyurtma berish uchun /new_order buyrug'ini bosing.", reply_markup=ReplyKeyboardRemove())
 
-# ----------------- /new_order (FSM) -----------------
 @router.message(Command("new_order"))
 async def new_order_cmd(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("Sizning ismingiz nima?")
+    await state.update_data(
+        categories=[], xona=[], zamer=[], dizayn=[]
+    )
+    await message.answer("Ismingiz nima (FISH)?", reply_markup=ReplyKeyboardRemove())
     await state.set_state(OrderForm.name)
 
 @router.message(OrderForm.name)
@@ -75,7 +79,7 @@ async def process_name(message: types.Message, state: FSMContext):
 @router.message(OrderForm.phone)
 async def process_phone(message: types.Message, state: FSMContext):
     await state.update_data(phone=message.text)
-    await message.answer("Manzilingizni kiriting (yoki lokatsiya yuboring):")
+    await message.answer("O'rnatish manzilini kiriting (yoki lokatsiya yuboring):")
     await state.set_state(OrderForm.location)
 
 @router.message(OrderForm.location)
@@ -83,215 +87,248 @@ async def process_location(message: types.Message, state: FSMContext):
     loc_text = message.text if message.text else "Lokatsiya yuborildi"
     await state.update_data(location=loc_text)
     
-    # Initialize items
-    items = {"Shkaf": 0, "Oshxona": 0, "Stol": 0}
-    await state.update_data(items=items)
-    
-    kb = generate_items_keyboard(items)
-    await message.answer("Mahsulotlarni belgilang:", reply_markup=kb)
-    await state.set_state(OrderForm.items)
+    cat_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Shkaf", callback_data="cat_Shkaf"), InlineKeyboardButton(text="Krovat", callback_data="cat_Krovat")],
+        [InlineKeyboardButton(text="Parta", callback_data="cat_Parta"), InlineKeyboardButton(text="Komod", callback_data="cat_Komod")],
+        [InlineKeyboardButton(text="✅ Davom etish", callback_data="cat_done")]
+    ])
+    await message.answer("Kategoriyalarni tanlang:", reply_markup=cat_kb)
+    await state.set_state(OrderForm.categories)
 
-def generate_items_keyboard(items: dict):
-    buttons = []
-    for k, v in items.items():
-        buttons.append([
-            InlineKeyboardButton(text=f"➖", callback_data=f"item_sub_{k}"),
-            InlineKeyboardButton(text=f"{k}: {v} ta", callback_data="ignore"),
-            InlineKeyboardButton(text=f"➕", callback_data=f"item_add_{k}")
-        ])
-    buttons.append([InlineKeyboardButton(text="✅ Tasdiqlash", callback_data="items_done")])
-    buttons.append([InlineKeyboardButton(text="📝 Edit (Boshidan boshlash)", callback_data="edit_order")])
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-@router.callback_query(OrderForm.items, F.data.startswith("item_"))
-async def process_items_callback(callback: CallbackQuery, state: FSMContext):
-    action = callback.data.split("_")[1]
-    item_name = callback.data.split("_")[2]
+@router.callback_query(OrderForm.categories, F.data.startswith("cat_"))
+async def process_cats(callback: CallbackQuery, state: FSMContext):
+    data = callback.data.split("_")[1]
     
-    data = await state.get_data()
-    items = data.get("items", {"Shkaf": 0, "Oshxona": 0, "Stol": 0})
+    sdata = await state.get_data()
+    cats = sdata.get("categories", [])
     
-    if action == "add":
-        items[item_name] += 1
-    elif action == "sub" and items[item_name] > 0:
-        items[item_name] -= 1
+    if data == "done":
+        if not cats:
+            await callback.answer("Eng kamida 1 ta kategoriya tanlang!", show_alert=True)
+            return
+        await callback.message.delete()
+        await callback.message.answer(f"Tanlandi: {', '.join(cats)}\n\nEndi Xona rasmlarini yuboring (yoki O'tkazib yuborishni bosing).", reply_markup=skip_kb())
+        await state.set_state(OrderForm.xona_photos)
+        return
         
-    await state.update_data(items=items)
-    await callback.message.edit_reply_markup(reply_markup=generate_items_keyboard(items))
-    await callback.answer()
-
-@router.callback_query(F.data == "edit_order")
-async def edit_order_callback(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.answer("Ma'lumotlarni bekor qildik. Ismingizni qaytadan kiriting:")
-    await state.set_state(OrderForm.name)
-    await callback.answer()
-
-@router.callback_query(F.data == "items_done")
-async def items_done_callback(callback: CallbackQuery, state: FSMContext):
+    if data in cats: cats.remove(data)
+    else: cats.append(data)
+    
+    await state.update_data(categories=cats)
+    
+    cat_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"Shkaf {'✅' if 'Shkaf' in cats else ''}", callback_data="cat_Shkaf"), 
+         InlineKeyboardButton(text=f"Krovat {'✅' if 'Krovat' in cats else ''}", callback_data="cat_Krovat")],
+        [InlineKeyboardButton(text=f"Parta {'✅' if 'Parta' in cats else ''}", callback_data="cat_Parta"), 
+         InlineKeyboardButton(text=f"Komod {'✅' if 'Komod' in cats else ''}", callback_data="cat_Komod")],
+        [InlineKeyboardButton(text="✅ Davom etish", callback_data="cat_done")]
+    ])
     try:
-        data = await state.get_data()
-        name = data.get('name')
-        phone = data.get('phone')
-        location = data.get('location')
-        items = data.get('items', {})
-        
-        # Save to Supabase
-        order_id = "LOCAL_TEST"
-        if supabase:
-            try:
-                res = supabase.table("orders").insert({
-                    "customer_name": name,
-                    "phone": phone,
-                    "location": location,
-                    "items": items,
-                    "status": "NEW"
-                }).execute()
-                if res.data:
-                    order_id = res.data[0]['id']
-            except Exception as supabase_e:
-                logging.error(f"Supabase Error: {supabase_e}")
-                # We will intentionally not crash here
-                
-        # Send to group
-        items_text = ", ".join([f"{k}: {v}" for k, v in items.items() if v > 0])
-        msg_text = f"🆕 <b>YANGI BUYURTMA</b>\n\n🆔 ID: <code>{order_id}</code>\n👤 Ism: {name}\n📞 Tel: {phone}\n📍 Manzil: {location}\n📦 Mahsulotlar: {items_text}"
-        
-        status_kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Status -> MEASUREMENT 📏", callback_data=f"status_MEASUREMENT_{order_id}")],
-            [InlineKeyboardButton(text="Status -> PRODUCTION 🪚", callback_data=f"status_PRODUCTION_{order_id}")],
-            [InlineKeyboardButton(text="Status -> DONE ✅", callback_data=f"status_DONE_{order_id}")]
-        ])
-        
-        thread_id = int(TOPIC_ORDER) if TOPIC_ORDER else None
-        
-        try:
-            await bot.send_message(chat_id=GROUP_ID, message_thread_id=thread_id, text=msg_text, reply_markup=status_kb)
-        except Exception as e:
-            logging.error(f"Telegram Send Error: {e}")
-            try:
-                # fallback without topic if it fails
-                await bot.send_message(chat_id=GROUP_ID, text=msg_text, reply_markup=status_kb)
-            except Exception as e2:
-                # Tell the user we failed to send to group
-                await callback.message.answer(f"⚠️ Ma'lumot guruhga bormadi! Guruh muammosi. Xato: {str(e2)}")
-                raise e2
-            
-        await callback.message.answer(f"✅ Buyurtma qabul qilindi! Buyurtma ID: {order_id}")
-        await state.clear()
-        
-    except Exception as general_error:
-        await callback.message.answer(f"🛑 XATOLIK YUZ BERDI: {str(general_error)}")
-    finally:
-        await callback.answer()
-
-# ----------------- Status Updates -----------------
-@router.callback_query(F.data.startswith("status_"))
-async def status_update_callback(callback: CallbackQuery):
-    parts = callback.data.split("_")
-    new_status = parts[1]
-    order_id = parts[2]
-    
-    if supabase:
-        supabase.table("orders").update({"status": new_status}).eq("id", order_id).execute()
-        
-    await callback.message.answer(f"✅ Order {order_id} statusi {new_status} ga o'zgardi!")
-    
-    thread_id = int(TOPIC_ORDER) if TOPIC_ORDER else None
-    if new_status == "PRODUCTION" and TOPIC_PRODUCTION: thread_id = int(TOPIC_PRODUCTION)
-    if new_status == "DONE" and TOPIC_DONE: thread_id = int(TOPIC_DONE)
-    if new_status == "MEASUREMENT" and TOPIC_ZAMER: thread_id = int(TOPIC_ZAMER)
-    
-    try:
-        await bot.send_message(chat_id=GROUP_ID, message_thread_id=thread_id, text=f"🔄 <b>STATUS YANGILANDI</b>\n\n🆔 Buyurtma: <code>{order_id}</code>\n📊 Yangi holat: {new_status}")
-    except Exception:
-        await bot.send_message(chat_id=GROUP_ID, text=f"🔄 <b>STATUS YANGILANDI</b>\n\n🆔 Buyurtma: <code>{order_id}</code>\n📊 Yangi holat: {new_status}")
+        await callback.message.edit_reply_markup(reply_markup=cat_kb)
+    except: pass
     await callback.answer()
 
-# ----------------- /order -----------------
-@router.message(Command("order"))
-async def order_list_cmd(message: types.Message):
+@router.message(OrderForm.xona_photos)
+async def process_xona(message: types.Message, state: FSMContext):
+    if message.text in ["⏭ O'tkazib yuborish", "➡️ Davom etish"]:
+        await message.answer("O'lchamlar (Zamer) rasmini yoki ma'lumotlarini yuboring. Bu bosqichni o'tkazib yuborib bo'lmaydi!", reply_markup=next_kb())
+        await state.set_state(OrderForm.measurements)
+        return
+    
+    if message.photo:
+        sdata = await state.get_data()
+        xona = sdata.get("xona", [])
+        xona.append(message.photo[-1].file_id)
+        await state.update_data(xona=xona)
+
+@router.message(OrderForm.measurements)
+async def process_measurements(message: types.Message, state: FSMContext):
+    sdata = await state.get_data()
+    
+    if message.text == "➡️ Davom etish":
+        if not sdata.get("zamer") and not sdata.get("zamer_text"):
+            await message.answer("Iltimos, o'lchamlarni kiriting yoki rasm yuklang!")
+            return
+        await message.answer("Dizayn namunalarini yuboring (yoki O'tkazib yuborish):", reply_markup=skip_kb())
+        await state.set_state(OrderForm.design_photos)
+        return
+        
+    if message.photo:
+        zamer = sdata.get("zamer", [])
+        zamer.append(message.photo[-1].file_id)
+        await state.update_data(zamer=zamer)
+    elif message.text:
+        zamer_text = sdata.get("zamer_text", "") + "\n" + message.text
+        await state.update_data(zamer_text=zamer_text)
+
+@router.message(OrderForm.design_photos)
+async def process_design(message: types.Message, state: FSMContext):
+    if message.text in ["⏭ O'tkazib yuborish", "➡️ Davom etish"]:
+        await message.answer("Qat'iy muddatni kiriting (yoki O'tkazib yuborish):", reply_markup=skip_kb())
+        await state.set_state(OrderForm.deadline)
+        return
+        
+    if message.photo:
+        sdata = await state.get_data()
+        dizayn = sdata.get("dizayn", [])
+        dizayn.append(message.photo[-1].file_id)
+        await state.update_data(dizayn=dizayn)
+
+@router.message(OrderForm.deadline)
+async def process_deadline(message: types.Message, state: FSMContext):
+    deadline = message.text
+    if message.text in ["⏭ O'tkazib yuborish", "➡️ Davom etish"]:
+        deadline = "Neizvestno"
+    
+    await state.update_data(deadline=deadline)
+    await message.answer("Tasdiqlash uchun Maxsus Parolingizni kiriting:", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(OrderForm.password)
+
+@router.message(OrderForm.password)
+async def process_password(message: types.Message, state: FSMContext):
+    pwd = message.text
+    
+    # Authenticate
     if not supabase:
         await message.answer("Baza ulanmagan.")
         return
         
-    res = supabase.table("orders").select("id, customer_name, status").neq("status", "DONE").execute()
-    orders = res.data
-    
-    if not orders:
-        await message.answer("Faol buyurtmalar yo'q.")
+    res = supabase.table("employees").select("*").eq("password", pwd).execute()
+    if not res.data:
+        await message.answer("Noto'g'ri parol! Qaytadan kiriting:")
         return
         
-    kb_list = []
-    for o in orders:
-        kb_list.append([InlineKeyboardButton(text=f"{o['customer_name']} [{o['status']}]", callback_data=f"select_order_{o['id']}")])
-        
-    await message.answer("Buyurtmani tanlang:", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_list))
-
-@router.callback_query(F.data.startswith("select_order_"))
-async def select_order_callback(callback: CallbackQuery, state: FSMContext):
-    order_id = callback.data.split("select_order_")[1]
-    await state.update_data(selected_order_id=order_id)
+    employee = res.data[0]
     
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Xona (Rasm)", callback_data="upload_xona"),
-            InlineKeyboardButton(text="Zamer", callback_data="upload_zamer")
-        ],
-        [
-            InlineKeyboardButton(text="Dizayn", callback_data="upload_dizayn"),
-            InlineKeyboardButton(text="Smeta", callback_data="upload_smeta")
-        ]
-    ])
+    # Save order
+    sdata = await state.get_data()
     
-    await callback.message.edit_text(f"Tanlangan Buyurtma: {order_id}\n\nQaysi turni yuklamoqchisiz?", reply_markup=kb)
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("upload_"))
-async def upload_type_callback(callback: CallbackQuery, state: FSMContext):
-    media_type = callback.data.split("upload_")[1]
-    await state.update_data(upload_type=media_type)
-    await state.set_state(MediaUpload.waiting_for_media)
-    await callback.message.answer(f"Iltimos, {media_type} rasm yoki faylini yuboring.")
-    await callback.answer()
-
-@router.message(MediaUpload.waiting_for_media, F.photo | F.document)
-async def handle_media_upload(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    order_id = data.get("selected_order_id")
-    media_type = data.get("upload_type")
-    
-    if message.photo:
-        file_id = message.photo[-1].file_id
-    else:
-        file_id = message.document.file_id
-        
-    if supabase and order_id:
-        supabase.table("order_media").insert({
-            "order_id": order_id,
-            "media_type": media_type,
-            "file_id": file_id
+    try:
+        ins = supabase.table("orders").insert({
+            "customer_name": sdata['name'],
+            "phone": sdata['phone'],
+            "location": sdata['location'],
+            "categories": sdata['categories'],
+            "measurements": sdata.get('zamer_text', "Rasm orqali berilgan"),
+            "deadline": sdata['deadline'],
+            "employee_id": employee['id'],
+            "status": "Savatda"
         }).execute()
         
-        await message.answer(f"✅ {media_type} bazaga saqlandi!")
+        order_id = ins.data[0]['id']
         
-        # notify group
-        thread_id = get_media_thread(media_type)
+        # Save media logically inside Supabase
+        for group, items in [('xona', sdata['xona']), ('zamer', sdata['zamer']), ('dizayn', sdata['dizayn'])]:
+            for fid in items:
+                supabase.table("order_media").insert({"order_id": order_id, "media_type": group, "file_id": fid}).execute()
+                
+    except Exception as e:
+        await message.answer(f"Xatolik saqlashda: {e}")
+        return
         
-        caption = f"📎 <b>Yangi fayl yuklandi:</b> {media_type.upper()}\n🆔 Order ID: <code>{order_id}</code>"
-        try:
-            if message.photo:
-                await bot.send_photo(chat_id=GROUP_ID, photo=file_id, caption=caption, message_thread_id=thread_id)
+    # Send texts to topics
+    cat_text = ", ".join(sdata['categories'])
+    msg_text = f"🆕 <b>YANGI BUYURTMA</b>\n\n🆔 ID: <code>{order_id}</code>\n👤 Mijoz: {sdata['name']}\n📞 Tel: {sdata['phone']}\n📍 Manzil: {sdata['location']}\n📦 Kategoriyalar: {cat_text}\n📏 O'lcham: {sdata.get('zamer_text', 'Faqat rasm')}\n⏳ Muddat: {sdata['deadline']}\n\n👷‍♂️ <b>Qabul qildi:</b> {employee['name']} ({employee['phone']})"
+    
+    status_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Texnologda", callback_data=f"st_Texnologda_{order_id}"), InlineKeyboardButton(text="Ishlab chiqarishda", callback_data=f"st_Ishlab chiqarishda_{order_id}")],
+        [InlineKeyboardButton(text="Yetkazishda", callback_data=f"st_Yetkazishda_{order_id}"), InlineKeyboardButton(text="O'rnatishda", callback_data=f"st_O'rnatishda_{order_id}")],
+        [InlineKeyboardButton(text="Topshirilgan ✅", callback_data=f"st_Topshirilgan_{order_id}")],
+        [InlineKeyboardButton(text="🛑 Xatolik sabab toxtab qolgan", callback_data=f"st_Xatolik_{order_id}")]
+    ])
+    
+    t_order = int(TOPIC_ORDER) if TOPIC_ORDER else None
+    
+    try:
+        await bot.send_message(chat_id=GROUP_ID, message_thread_id=t_order, text=msg_text, reply_markup=status_kb)
+    except:
+        await bot.send_message(chat_id=GROUP_ID, text=msg_text, reply_markup=status_kb)
+        
+    # Send Media Groups
+    async def send_group_to_topic(topic_str, group_type, title, items):
+        if not items: return
+        tid = int(topic_str) if topic_str else t_order
+        media = []
+        for i, fid in enumerate(items):
+            if i == 0:
+                media.append(InputMediaPhoto(media=fid, caption=f"📁 {title}\n🆔 {order_id}\n👤 Mijoz: {sdata['name']}\n👷‍♂️ Qabul qildi: {employee['name']}"))
             else:
-                await bot.send_document(chat_id=GROUP_ID, document=file_id, caption=caption, message_thread_id=thread_id)
+                media.append(InputMediaPhoto(media=fid))
+        try:
+            await bot.send_media_group(chat_id=GROUP_ID, media=media, message_thread_id=tid)
         except Exception as e:
-            await message.answer("Fayl guruhga yuborilmadi (xatolik) lekin bazaga tushdi.")
-            
+            logging.error(f"MediaGroup error {group_type}: {e}")
+
+    await send_group_to_topic(TOPIC_XONA, "xona", "XONA RASMLARI", sdata['xona'])
+    await send_group_to_topic(TOPIC_ZAMER, "zamer", "O'LCHAMLAR (ZAMER)", sdata['zamer'])
+    await send_group_to_topic(TOPIC_DIZAYN, "dizayn", "DIZAYN NAMUNALARI", sdata['dizayn'])
+    
+    await message.answer(f"✅ Barchasi qabul qilindi. Buyurtma ID: {order_id}")
     await state.clear()
+
+@router.callback_query(F.data.startswith("st_"))
+async def update_status_cb(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    new_status = parts[1]
+    order_id = parts[2]
+    
+    if new_status == "Xatolik":
+        new_status = "Xatolik sabab toxtab qolgan"
+        
+    if supabase:
+        supabase.table("orders").update({"status": new_status}).eq("id", order_id).execute()
+        
+    await callback.message.reply(f"🔄 Buyurtma statusi: <b>{new_status}</b>", parse_mode="HTML")
+    await callback.answer(f"Status: {new_status}")
+
+@router.message(Command("buyurtmalar"))
+async def list_orders(message: types.Message):
+    if not supabase: return
+    res = supabase.table("orders").select("id, customer_name, status, deadline").neq("status", "Topshirilgan").execute()
+    if not res.data:
+        await message.answer("Faol buyurtmalar yo'q.")
+        return
+    text = "📋 <b>Faol Buyurtmalar:</b>\n\n"
+    for o in res.data:
+        text += f"🆔 <code>/order_{o['id'].replace('-','')}</code>\n👤 {o['customer_name']} - <b>{o['status']}</b> (Muddat: {o['deadline']})\n\n"
+    await message.answer(text)
+
+@router.message(F.text.startswith("/order_"))
+async def view_order(message: types.Message):
+    if not supabase: return
+    short_id = message.text.replace("/order_", "")
+    # Short ID matched with UUID logic is a bit tricky, let's just do a search
+    # This is a bit inefficient if lots of orders but works
+    res = supabase.table("orders").select("*, employees(name, phone)").execute()
+    
+    order = None
+    for o in res.data:
+        if o['id'].replace('-', '') == short_id:
+            order = o
+            break
+            
+    if not order:
+        await message.answer("Buyurtma topilmadi.")
+        return
+        
+    emp = order.get('employees', {})
+    emp_name = emp.get('name', 'Noma''lum')
+    
+    cat_text = ", ".join(order['categories'])
+    msg_text = f"📄 <b>BUYURTMA MA'LUMOTI</b>\n\n🆔 <code>{order['id']}</code>\n👤 Mijoz: {order['customer_name']}\n📞 Tel: {order['phone']}\n📍 Manzil: {order['location']}\n📦 Kategoriyalar: {cat_text}\n📏 O'lcham: {order['measurements']}\n⏳ Muddat: {order.get('deadline','Neizvestno')}\n📅 Olingan sana: {order['created_at'][:10]}\n\n👷‍♂️ <b>Xodim:</b> {emp_name}\n\n📊 <b>STATUS: {order['status']}</b>"
+    
+    status_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Texnologda", callback_data=f"st_Texnologda_{order['id']}"), InlineKeyboardButton(text="Ishlab chiqarishda", callback_data=f"st_Ishlab chiqarishda_{order['id']}")],
+        [InlineKeyboardButton(text="Yetkazishda", callback_data=f"st_Yetkazishda_{order['id']}"), InlineKeyboardButton(text="O'rnatishda", callback_data=f"st_O'rnatishda_{order['id']}")],
+        [InlineKeyboardButton(text="Topshirilgan ✅", callback_data=f"st_Topshirilgan_{order['id']}")],
+        [InlineKeyboardButton(text="🛑 Xatolik", callback_data=f"st_Xatolik_{order['id']}")]
+    ])
+    
+    await message.answer(msg_text, reply_markup=status_kb)
 
 dp.include_router(router)
 
-@app.post("/api/webhook") # or just the path you configure in vercel webhook url
+@app.post("/api/webhook")
 async def webhook(request: Request):
     try:
         update_data = await request.json()
