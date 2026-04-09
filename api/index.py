@@ -174,13 +174,13 @@ async def start_cmd(message: types.Message):
 async def new_order_cmd(message: types.Message, state: FSMContext):
     await state.clear()
     await state.update_data(categories={"Shkaf": 0, "Krovat": 0, "Parta": 0, "Komod": 0}, xona=[], zamer=[], dizayn=[])
-    await message.answer("Ismingiz nima (FISH)?", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Buyurtmachi ismi:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(OrderForm.name)
 
 @router.message(OrderForm.name)
 async def process_name(message: types.Message, state: FSMContext):
     await state.update_data(name=message.text)
-    await message.answer("Telefon raqamingizni kiriting:")
+    await message.answer("Buyurtmachi telefon raqami:")
     await state.set_state(OrderForm.phone)
 
 @router.message(OrderForm.phone)
@@ -193,7 +193,7 @@ async def process_phone(message: types.Message, state: FSMContext):
 async def process_region(message: types.Message, state: FSMContext):
     r_code = REGIONS.get(message.text, "00")
     await state.update_data(region_code=r_code, region_name=message.text)
-    await message.answer("O'rnatish manzilini kiriting (yoki xarita lokatsiyasini yuboring):", reply_markup=loc_kb())
+    await message.answer("O'rnatish manzili:", reply_markup=loc_kb())
     await state.set_state(OrderForm.location)
 
 @router.message(OrderForm.location)
