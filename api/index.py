@@ -3,13 +3,14 @@ import json
 import datetime
 import random
 import string
+from typing import Any, Dict, Optional
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types, F, Router
 from aiogram.enums import ParseMode
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.base import BaseStorage, StorageKey, StateType
 from supabase import create_client, Client
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InputMediaPhoto, InputMediaDocument
 from aiogram.client.default import DefaultBotProperties
@@ -34,8 +35,53 @@ supabase: Client = None
 if SUPABASE_URL and SUPABASE_KEY:
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
+
+class SupabaseStorage(BaseStorage):
+    """Supabase-backed FSM storage — serverless cold start'dan keyin ham holatni saqlaydi."""
+
+    def _key(self, key: StorageKey):
+        return key.chat_id, key.user_id
+
+    async def set_state(self, key: StorageKey, state: StateType = None) -> None:
+        chat_id, user_id = self._key(key)
+        state_str = state.state if hasattr(state, 'state') else state
+        if supabase:
+            supabase.table("fsm_states").upsert({
+                "chat_id": chat_id, "user_id": user_id,
+                "state": state_str
+            }, on_conflict="chat_id,user_id").execute()
+
+    async def get_state(self, key: StorageKey) -> Optional[str]:
+        chat_id, user_id = self._key(key)
+        if not supabase: return None
+        res = supabase.table("fsm_states").select("state").eq("chat_id", chat_id).eq("user_id", user_id).execute()
+        if res.data: return res.data[0].get("state")
+        return None
+
+    async def set_data(self, key: StorageKey, data: Dict[str, Any]) -> None:
+        chat_id, user_id = self._key(key)
+        if supabase:
+            supabase.table("fsm_states").upsert({
+                "chat_id": chat_id, "user_id": user_id,
+                "data": json.dumps(data, default=str)
+            }, on_conflict="chat_id,user_id").execute()
+
+    async def get_data(self, key: StorageKey) -> Dict[str, Any]:
+        chat_id, user_id = self._key(key)
+        if not supabase: return {}
+        res = supabase.table("fsm_states").select("data").eq("chat_id", chat_id).eq("user_id", user_id).execute()
+        if res.data:
+            raw = res.data[0].get("data", "{}")
+            if isinstance(raw, str): return json.loads(raw)
+            if isinstance(raw, dict): return raw
+        return {}
+
+    async def close(self) -> None:
+        pass
+
+
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-dp = Dispatcher(storage=MemoryStorage())
+dp = Dispatcher(storage=SupabaseStorage())
 router = Router()
 app = FastAPI()
 
