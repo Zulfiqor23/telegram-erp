@@ -19,8 +19,17 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8353264846:AAHlGhCK7z7iNG8cwOCt6Sff6gDEcr3VSvM")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-GROUP_ID = os.getenv("GROUP_ID", "-1003926587727")
-TOPIC_ASOSIY = os.getenv("TOPIC_ASOSIY", "")
+GROUP_ID = os.getenv("GROUP_ID", "-1003926147374")
+TOPIC_ORDER = os.getenv("TOPIC_ORDER", os.getenv("TOPIC_ASOSIY", ""))
+TOPIC_ZAMER = os.getenv("TOPIC_ZAMER", "")
+TOPIC_DIZAYN = os.getenv("TOPIC_DIZAYN", "")
+TOPIC_PRODUCTION = os.getenv("TOPIC_ISHLAB_CHIQARISH", "")
+TOPIC_DONE = os.getenv("TOPIC_DONE", "")
+
+def get_media_thread(media_type: str):
+    if media_type in ("zamer", "xona") and TOPIC_ZAMER: return int(TOPIC_ZAMER)
+    if media_type in ("dizayn", "smeta") and TOPIC_DIZAYN: return int(TOPIC_DIZAYN)
+    return int(TOPIC_ORDER) if TOPIC_ORDER else None
 
 # Initialize Supabase
 supabase: Client = None
@@ -154,7 +163,7 @@ async def items_done_callback(callback: CallbackQuery, state: FSMContext):
             [InlineKeyboardButton(text="Status -> DONE ✅", callback_data=f"status_DONE_{order_id}")]
         ])
         
-        thread_id = int(TOPIC_ASOSIY) if TOPIC_ASOSIY else None
+        thread_id = int(TOPIC_ORDER) if TOPIC_ORDER else None
         
         try:
             await bot.send_message(chat_id=GROUP_ID, message_thread_id=thread_id, text=msg_text, reply_markup=status_kb)
@@ -188,8 +197,15 @@ async def status_update_callback(callback: CallbackQuery):
         
     await callback.message.answer(f"✅ Order {order_id} statusi {new_status} ga o'zgardi!")
     
-    thread_id = int(TOPIC_ASOSIY) if TOPIC_ASOSIY else None
-    await bot.send_message(chat_id=GROUP_ID, message_thread_id=thread_id, text=f"🔄 <b>STATUS YANGILANDI</b>\n\n🆔 Buyurtma: <code>{order_id}</code>\n📊 Yangi holat: {new_status}")
+    thread_id = int(TOPIC_ORDER) if TOPIC_ORDER else None
+    if new_status == "PRODUCTION" and TOPIC_PRODUCTION: thread_id = int(TOPIC_PRODUCTION)
+    if new_status == "DONE" and TOPIC_DONE: thread_id = int(TOPIC_DONE)
+    if new_status == "MEASUREMENT" and TOPIC_ZAMER: thread_id = int(TOPIC_ZAMER)
+    
+    try:
+        await bot.send_message(chat_id=GROUP_ID, message_thread_id=thread_id, text=f"🔄 <b>STATUS YANGILANDI</b>\n\n🆔 Buyurtma: <code>{order_id}</code>\n📊 Yangi holat: {new_status}")
+    except Exception:
+        await bot.send_message(chat_id=GROUP_ID, text=f"🔄 <b>STATUS YANGILANDI</b>\n\n🆔 Buyurtma: <code>{order_id}</code>\n📊 Yangi holat: {new_status}")
     await callback.answer()
 
 # ----------------- /order -----------------
@@ -260,7 +276,7 @@ async def handle_media_upload(message: types.Message, state: FSMContext):
         await message.answer(f"✅ {media_type} bazaga saqlandi!")
         
         # notify group
-        thread_id = int(TOPIC_ASOSIY) if TOPIC_ASOSIY else None
+        thread_id = get_media_thread(media_type)
         
         caption = f"📎 <b>Yangi fayl yuklandi:</b> {media_type.upper()}\n🆔 Order ID: <code>{order_id}</code>"
         try:
