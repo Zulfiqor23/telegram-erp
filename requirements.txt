@@ -1,0 +1,6 @@
+aiogram==3.4.1
+fastapi
+uvicorn
+supabase
+pydantic
+python-dotenv
