@@ -120,50 +120,61 @@ async def edit_order_callback(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "items_done")
 async def items_done_callback(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    name = data.get('name')
-    phone = data.get('phone')
-    location = data.get('location')
-    items = data.get('items', {})
-    
-    # Save to Supabase
-    order_id = "LOCAL_TEST"
-    if supabase:
-        try:
-            res = supabase.table("orders").insert({
-                "customer_name": name,
-                "phone": phone,
-                "location": location,
-                "items": items,
-                "status": "NEW"
-            }).execute()
-            if res.data:
-                order_id = res.data[0]['id']
-        except Exception as e:
-            logging.error(f"Supabase Error: {e}")
-            
-    # Send to group
-    items_text = ", ".join([f"{k}: {v}" for k, v in items.items() if v > 0])
-    msg_text = f"🆕 <b>YANGI BUYURTMA</b>\n\n🆔 ID: <code>{order_id}</code>\n👤 Ism: {name}\n📞 Tel: {phone}\n📍 Manzil: {location}\n📦 Mahsulotlar: {items_text}"
-    
-    status_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Status -> MEASUREMENT 📏", callback_data=f"status_MEASUREMENT_{order_id}")],
-        [InlineKeyboardButton(text="Status -> PRODUCTION 🪚", callback_data=f"status_PRODUCTION_{order_id}")],
-        [InlineKeyboardButton(text="Status -> DONE ✅", callback_data=f"status_DONE_{order_id}")]
-    ])
-    
-    thread_id = int(TOPIC_ASOSIY) if TOPIC_ASOSIY else None
-    
     try:
-        await bot.send_message(chat_id=GROUP_ID, message_thread_id=thread_id, text=msg_text, reply_markup=status_kb)
-    except Exception as e:
-        logging.error(f"Telegram Send Error: {e}")
-        # fallback without topic if it fails
-        await bot.send_message(chat_id=GROUP_ID, text=msg_text, reply_markup=status_kb)
+        data = await state.get_data()
+        name = data.get('name')
+        phone = data.get('phone')
+        location = data.get('location')
+        items = data.get('items', {})
         
-    await callback.message.answer(f"Buyurtma qabul qilindi! Buyurtma ID: {order_id}")
-    await state.clear()
-    await callback.answer()
+        # Save to Supabase
+        order_id = "LOCAL_TEST"
+        if supabase:
+            try:
+                res = supabase.table("orders").insert({
+                    "customer_name": name,
+                    "phone": phone,
+                    "location": location,
+                    "items": items,
+                    "status": "NEW"
+                }).execute()
+                if res.data:
+                    order_id = res.data[0]['id']
+            except Exception as supabase_e:
+                logging.error(f"Supabase Error: {supabase_e}")
+                # We will intentionally not crash here
+                
+        # Send to group
+        items_text = ", ".join([f"{k}: {v}" for k, v in items.items() if v > 0])
+        msg_text = f"🆕 <b>YANGI BUYURTMA</b>\n\n🆔 ID: <code>{order_id}</code>\n👤 Ism: {name}\n📞 Tel: {phone}\n📍 Manzil: {location}\n📦 Mahsulotlar: {items_text}"
+        
+        status_kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Status -> MEASUREMENT 📏", callback_data=f"status_MEASUREMENT_{order_id}")],
+            [InlineKeyboardButton(text="Status -> PRODUCTION 🪚", callback_data=f"status_PRODUCTION_{order_id}")],
+            [InlineKeyboardButton(text="Status -> DONE ✅", callback_data=f"status_DONE_{order_id}")]
+        ])
+        
+        thread_id = int(TOPIC_ASOSIY) if TOPIC_ASOSIY else None
+        
+        try:
+            await bot.send_message(chat_id=GROUP_ID, message_thread_id=thread_id, text=msg_text, reply_markup=status_kb)
+        except Exception as e:
+            logging.error(f"Telegram Send Error: {e}")
+            try:
+                # fallback without topic if it fails
+                await bot.send_message(chat_id=GROUP_ID, text=msg_text, reply_markup=status_kb)
+            except Exception as e2:
+                # Tell the user we failed to send to group
+                await callback.message.answer(f"⚠️ Ma'lumot guruhga bormadi! Guruh muammosi. Xato: {str(e2)}")
+                raise e2
+            
+        await callback.message.answer(f"✅ Buyurtma qabul qilindi! Buyurtma ID: {order_id}")
+        await state.clear()
+        
+    except Exception as general_error:
+        await callback.message.answer(f"🛑 XATOLIK YUZ BERDI: {str(general_error)}")
+    finally:
+        await callback.answer()
 
 # ----------------- Status Updates -----------------
 @router.callback_query(F.data.startswith("status_"))
