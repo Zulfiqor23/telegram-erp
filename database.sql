@@ -17,16 +17,19 @@ CREATE TABLE "employees" (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT (now() AT TIME ZONE 'Asia/Tashkent')
 );
 
--- 3. Buyurtmalar (Orders) jadvalini kengaytirilgan formatda yaratish
 CREATE TABLE "orders" (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id VARCHAR(50) PRIMARY KEY,
     customer_name VARCHAR(255) NOT NULL,
     phone VARCHAR(50) NOT NULL,
     location TEXT NOT NULL,
+    location_data JSONB,           -- Lokatsiya bosilganda jo'natish uchun koordinatalar (agar tayyor xarita kelsa)
+    order_type VARCHAR(50) NOT NULL DEFAULT 'Jo''yga moslangan', -- Erkin yoki Jo'yga moslangan
     categories JSONB,              -- Tanlangan mahsulot turlari (Shkaf, ... )
     measurements TEXT,             -- O'lchamlar matni yoki ma'lumoti
     deadline VARCHAR(100),         -- Qachonga qilinishi kerakligi
     status VARCHAR(50) DEFAULT 'Savatda', -- Yangi statuslar tizimi
+    status_timestamps JSONB DEFAULT '{}'::jsonb, -- Xronologiyani saqlash uchun
+    group_message_id BIGINT,       -- Guruh postiga javob qaytarish/tahrirlash uchun Message ID
     employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL, -- Zayavkani olgan xodim (FK)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT (now() AT TIME ZONE 'Asia/Tashkent')
 );
@@ -34,7 +37,7 @@ CREATE TABLE "orders" (
 -- 4. Medialar jadvalini saqlab qolish
 CREATE TABLE "order_media" (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    order_id UUID REFERENCES orders(id) ON DELETE CASCADE,
+    order_id VARCHAR(50) REFERENCES orders(id) ON DELETE CASCADE,
     media_type VARCHAR(50) NOT NULL, -- xona, zamer, dizayn
     file_id TEXT NOT NULL,           -- Telegram file_id
     created_at TIMESTAMP WITH TIME ZONE DEFAULT (now() AT TIME ZONE 'Asia/Tashkent')
@@ -49,6 +52,8 @@ CREATE POLICY "Enable all for authenticated or anon service role" ON employees F
 CREATE POLICY "Enable all for authenticated or anon service role" ON orders FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Enable all for authenticated or anon service role" ON order_media FOR ALL USING (true) WITH CHECK (true);
 
--- 6. Dastlabki TEST xodimini qo'shib qo'yamiz (botni test qilish uchun)
--- Ismi: Aziz, Paroli: 1234
-INSERT INTO employees (name, phone, password) VALUES ('Test Xodim (Aziz)', '+998901234567', '1234');
+-- 6. Xodimlar ro'yxati (Boshlang'ich kiritishlar)
+INSERT INTO employees (name, phone, password) VALUES 
+('Avazbek Valiev', '+998958452029', '2029'),
+('Zulfiqor Abdumannonov', '+998942009910', '9910'),
+('Erkaboyev Muxsinjon', '+998948212029', '5544');
