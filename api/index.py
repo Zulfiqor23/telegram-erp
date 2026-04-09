@@ -515,6 +515,44 @@ async def view_order(message: types.Message):
     
     await message.answer(msg_text, reply_markup=status_kb, disable_web_page_preview=True)
 
+@router.message(Command("clear"))
+async def clear_data(message: types.Message):
+    # Faqat shaxsiy chatda ishlaydi
+    if message.chat.type != "private":
+        return
+    # Faqat admin
+    if message.from_user.id not in ADMIN_USERS:
+        await message.answer("⛔ Sizda bu buyruqni ishlatish huquqi yo'q!")
+        return
+    if not supabase:
+        await message.answer("Baza ulanmagan.")
+        return
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ha, barchasini o'chir", callback_data="confirm_clear")],
+        [InlineKeyboardButton(text="❌ Yo'q, bekor qilish", callback_data="cancel_clear")]
+    ])
+    await message.answer("⚠️ DIQQAT!\n\nBarcha buyurtmalar, rasmlar va FSM holatlari o'chiriladi.\nBu amalni ortga qaytarib bo'lmaydi!\n\nDavom etasizmi?", reply_markup=kb)
+
+@router.callback_query(F.data == "confirm_clear")
+async def confirm_clear(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_USERS:
+        await callback.answer("⛔ Huquq yo'q!", show_alert=True)
+        return
+    try:
+        supabase.table("order_media").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+        supabase.table("orders").delete().neq("id", "---").execute()
+        supabase.table("fsm_states").delete().neq("chat_id", 0).execute()
+        await callback.message.edit_text("🗑 Barcha buyurtmalar, rasmlar va FSM holatlari tozalandi!")
+    except Exception as e:
+        await callback.message.edit_text(f"Xatolik: {e}")
+    await callback.answer()
+
+@router.callback_query(F.data == "cancel_clear")
+async def cancel_clear(callback: CallbackQuery):
+    await callback.message.edit_text("Bekor qilindi. Hech narsa o'chirilmadi.")
+    await callback.answer()
+
 dp.include_router(router)
 
 @app.post("/api/webhook")
