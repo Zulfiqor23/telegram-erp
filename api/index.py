@@ -440,6 +440,11 @@ async def process_password(message: types.Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("st_"))
 async def update_status_cb(callback: CallbackQuery):
+    # Faqat ruxsat berilgan adminlar status o'zgartira oladi
+    if callback.from_user.id not in ADMIN_USERS:
+        await callback.answer("⛔ Sizda buyurtma statusini o'zgartirish huquqi yo'q!", show_alert=True)
+        return
+    
     parts = callback.data.split("_")
     action = parts[1]
     order_id = parts[2]
