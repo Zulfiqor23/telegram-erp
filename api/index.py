@@ -414,6 +414,8 @@ async def process_password(message: types.Message, state: FSMContext):
     msg_text = get_status_board(order_row, emp_map)
     status_kb = get_status_markup(order_row)
     
+    media_msg_ids = []
+    
     try:
         msg = await bot.send_message(chat_id=GROUP_ID, message_thread_id=t_order, text=msg_text, reply_markup=status_kb, disable_web_page_preview=True)
         supabase.table("orders").update({"group_message_id": msg.message_id}).eq("id", order_id).execute()
@@ -428,12 +430,19 @@ async def process_password(message: types.Message, state: FSMContext):
                 media.append(InputMediaPhoto(media=fid, caption=f"📁 {title}\n🆔 {order_id}\n👤 Mijoz: {sdata['name']}\n👷‍♂️ Qabul qildi: {employee['name']}"))
             else:
                 media.append(InputMediaPhoto(media=fid))
-        try: await bot.send_media_group(chat_id=GROUP_ID, media=media, message_thread_id=tid)
+        try:
+            sent = await bot.send_media_group(chat_id=GROUP_ID, media=media, message_thread_id=tid)
+            for m in sent:
+                media_msg_ids.append(m.message_id)
         except Exception as e: pass
 
     await send_group_to_topic(TOPIC_XONA, "xona", "XONA RASMLARI", sdata['xona'])
     await send_group_to_topic(TOPIC_ZAMER, "zamer", "O'LCHAMLAR (ZAMER)", sdata['zamer'])
     await send_group_to_topic(TOPIC_DIZAYN, "dizayn", "DIZAYN NAMUNALARI", sdata['dizayn'])
+    
+    # Rasm xabarlarining ID larini bazaga saqlaymiz
+    if media_msg_ids:
+        supabase.table("orders").update({"group_media_msg_ids": media_msg_ids}).eq("id", order_id).execute()
     
     await message.answer(f"✅ Barcha ma'lumot qabul qilindi. Buyurtma ID: {order_id}")
     await state.clear()
@@ -542,15 +551,24 @@ async def confirm_clear(callback: CallbackQuery):
     try:
         await callback.message.edit_text("🔄 Guruh postlari o'chirilmoqda...")
         
-        # Avval guruhdagi postlarni o'chiramiz
-        orders = supabase.table("orders").select("group_message_id").execute()
+        # Avval guruhdagi postlarni o'chiramiz (buyurtma posti + rasm postlari)
+        orders = supabase.table("orders").select("group_message_id, group_media_msg_ids").execute()
         deleted = 0
         failed = 0
         for o in orders.data:
+            # Asosiy buyurtma posti
             msg_id = o.get("group_message_id")
             if msg_id:
                 try:
                     await bot.delete_message(chat_id=GROUP_ID, message_id=msg_id)
+                    deleted += 1
+                except Exception:
+                    failed += 1
+            # Rasm postlari
+            media_ids = o.get("group_media_msg_ids", []) or []
+            for mid in media_ids:
+                try:
+                    await bot.delete_message(chat_id=GROUP_ID, message_id=mid)
                     deleted += 1
                 except Exception:
                     failed += 1
@@ -560,7 +578,7 @@ async def confirm_clear(callback: CallbackQuery):
         supabase.table("orders").delete().neq("id", "---").execute()
         supabase.table("fsm_states").delete().neq("chat_id", 0).execute()
         
-        await callback.message.edit_text(f"🗑 Tozalandi!\n\n📨 Guruhdan o'chirildi: {deleted} ta post\n⚠️ O'chirib bo'lmadi: {failed} ta\n🗄 Baza: buyurtmalar, rasmlar, FSM — hammasi tozalandi!")
+        await callback.message.edit_text(f"🗑 Tozalandi!\n\n📨 Guruhdan o'chirildi: {deleted} ta xabar\n⚠️ O'chirib bo'lmadi: {failed} ta\n🗄 Baza: buyurtmalar, rasmlar, FSM — hammasi tozalandi!")
     except Exception as e:
         await callback.message.edit_text(f"Xatolik: {e}")
     await callback.answer()

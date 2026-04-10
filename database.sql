@@ -30,6 +30,7 @@ CREATE TABLE "orders" (
     status VARCHAR(50) DEFAULT 'Savatda', -- Yangi statuslar tizimi
     status_timestamps JSONB DEFAULT '{}'::jsonb, -- Xronologiyani saqlash uchun
     group_message_id BIGINT,       -- Guruh postiga javob qaytarish/tahrirlash uchun Message ID
+    group_media_msg_ids JSONB,     -- Rasm postlarining Message ID lari (o'chirish uchun)
     employee_id INTEGER REFERENCES employees(id) ON DELETE SET NULL, -- Zayavkani olgan xodim (FK)
     created_at TIMESTAMP WITH TIME ZONE DEFAULT (now() AT TIME ZONE 'Asia/Tashkent')
 );
