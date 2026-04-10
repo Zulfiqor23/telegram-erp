@@ -609,6 +609,62 @@ async def cancel_clear(callback: CallbackQuery):
     await callback.message.edit_text("Bekor qilindi. Hech narsa o'chirilmadi.")
     await callback.answer()
 
+@cmd_router.message(Command("purge"))
+async def purge_group(message: types.Message):
+    """Guruhdagi BARCHA xabarlarni o'chiradi (bazadagi va bazada bo'lmaganlarni ham)"""
+    if message.chat.type != "private":
+        return
+    if message.from_user.id not in ADMIN_USERS:
+        await message.answer("⛔ Sizda bu buyruqni ishlatish huquqi yo'q!")
+        return
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ha, guruhni tozala", callback_data="confirm_purge")],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="cancel_purge")]
+    ])
+    await message.answer("🔴 DIQQAT! Bu buyruq guruhdagi BARCHA xabarlarni o'chirishga harakat qiladi.\n\n⚠️ Bot admin bo'lgan va 48 soatdan eski bo'lmagan xabarlar o'chiriladi.\n\nDavom etasizmi?", reply_markup=kb)
+
+@router.callback_query(F.data == "confirm_purge")
+async def confirm_purge(callback: CallbackQuery):
+    if callback.from_user.id not in ADMIN_USERS:
+        await callback.answer("⛔ Huquq yo'q!", show_alert=True)
+        return
+    
+    await callback.message.edit_text("🔄 Guruh tozalanmoqda... Bu biroz vaqt olishi mumkin.")
+    
+    try:
+        # Oxirgi xabar ID sini aniqlash uchun vaqtinchalik xabar yuboramiz
+        temp_msg = await bot.send_message(chat_id=GROUP_ID, text="🔄 Tozalash jarayoni...")
+        last_id = temp_msg.message_id
+        await bot.delete_message(chat_id=GROUP_ID, message_id=last_id)
+        
+        deleted = 0
+        failed = 0
+        
+        # Oxirgi 500 ta xabar ID sini tekshiramiz (orqaga qarab)
+        for msg_id in range(last_id, max(last_id - 500, 0), -1):
+            try:
+                await bot.delete_message(chat_id=GROUP_ID, message_id=msg_id)
+                deleted += 1
+            except Exception:
+                failed += 1
+        
+        # Bazani ham tozalaymiz
+        if supabase:
+            supabase.table("order_media").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+            supabase.table("orders").delete().neq("id", "---").execute()
+            supabase.table("fsm_states").delete().neq("chat_id", 0).execute()
+        
+        await callback.message.edit_text(f"🗑 Guruh tozalandi!\n\n📨 O'chirildi: {deleted} ta xabar\n⏭ O'tkazib yuborildi: {failed} ta\n🗄 Baza ham tozalandi!")
+    except Exception as e:
+        await callback.message.edit_text(f"Xatolik: {e}")
+    await callback.answer()
+
+@router.callback_query(F.data == "cancel_purge")
+async def cancel_purge(callback: CallbackQuery):
+    await callback.message.edit_text("Bekor qilindi.")
+    await callback.answer()
+
 dp.include_router(cmd_router)  # Buyruqlar birinchi tekshiriladi
 dp.include_router(router)      # FSM handlerlar ikkinchi
 
