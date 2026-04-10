@@ -82,8 +82,13 @@ class SupabaseStorage(BaseStorage):
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher(storage=SupabaseStorage())
-router = Router()
+cmd_router = Router()  # Yuqori prioritetli — buyruqlar uchun
+router = Router()      # FSM va boshqa handlerlar uchun
 app = FastAPI()
+
+def is_command(message: types.Message) -> bool:
+    """Xabar slash-buyruq ekanligini tekshiradi"""
+    return message.text and message.text.startswith("/")
 
 class OrderForm(StatesGroup):
     name = State()
@@ -189,8 +194,10 @@ def get_status_markup(order):
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-@router.message(CommandStart())
-async def start_cmd(message: types.Message):
+@cmd_router.message(CommandStart())
+async def start_cmd(message: types.Message, state: FSMContext):
+    # Har qanday /start buyrug'i avvalgi FSM holatini tozalaydi
+    await state.clear()
     args = message.text.split()
     if len(args) > 1:
         param = args[1]
@@ -216,7 +223,7 @@ async def start_cmd(message: types.Message):
             
     await message.answer("Assalomu alaykum, Maryam Mebel botiga xush kelibsiz!\nBuyurtma berish uchun /new_order buyrug'ini bosing.", reply_markup=ReplyKeyboardRemove())
 
-@router.message(Command("new_order"))
+@cmd_router.message(Command("new_order"))
 async def new_order_cmd(message: types.Message, state: FSMContext):
     await state.clear()
     await state.update_data(categories={"Shkaf": 0, "Krovat": 0, "Parta": 0, "Komod": 0}, xona=[], zamer=[], dizayn=[])
@@ -225,18 +232,21 @@ async def new_order_cmd(message: types.Message, state: FSMContext):
 
 @router.message(OrderForm.name)
 async def process_name(message: types.Message, state: FSMContext):
+    if is_command(message): return
     await state.update_data(name=message.text)
     await message.answer("Buyurtmachi telefon raqami:")
     await state.set_state(OrderForm.phone)
 
 @router.message(OrderForm.phone)
 async def process_phone(message: types.Message, state: FSMContext):
+    if is_command(message): return
     await state.update_data(phone=message.text)
     await message.answer("Viloyatni tanlang:", reply_markup=region_kb())
     await state.set_state(OrderForm.region)
 
 @router.message(OrderForm.region)
 async def process_region(message: types.Message, state: FSMContext):
+    if is_command(message): return
     r_code = REGIONS.get(message.text, "00")
     await state.update_data(region_code=r_code, region_name=message.text)
     await message.answer("O'rnatish manzili:", reply_markup=loc_kb())
@@ -244,6 +254,7 @@ async def process_region(message: types.Message, state: FSMContext):
 
 @router.message(OrderForm.location)
 async def process_location(message: types.Message, state: FSMContext):
+    if is_command(message): return
     loc_data = None
     sdata = await state.get_data()
     r_name = sdata.get('region_name', '')
@@ -261,6 +272,7 @@ async def process_location(message: types.Message, state: FSMContext):
 
 @router.message(OrderForm.order_type)
 async def process_otype(message: types.Message, state: FSMContext):
+    if is_command(message): return
     otype = message.text if message.text in ["Erkin", "Joyga moslangan"] else "Joyga moslangan"
     await state.update_data(order_type=otype)
     sdata = await state.get_data()
@@ -300,6 +312,7 @@ async def process_cats(callback: CallbackQuery, state: FSMContext):
 
 @router.message(OrderForm.xona_photos)
 async def process_xona(message: types.Message, state: FSMContext):
+    if is_command(message): return
     sdata = await state.get_data()
     if message.text in ["⏭ O'tkazib yuborish", "➡️ Davom etish"]:
         if sdata.get("order_type") == "Joyga moslangan" and not sdata.get("xona") and message.text == "⏭ O'tkazib yuborish":
@@ -315,6 +328,7 @@ async def process_xona(message: types.Message, state: FSMContext):
 
 @router.message(OrderForm.measurements)
 async def process_measurements(message: types.Message, state: FSMContext):
+    if is_command(message): return
     sdata = await state.get_data()
     if message.text == "➡️ Davom etish":
         if not sdata.get("zamer") and not sdata.get("zamer_text"):
@@ -333,6 +347,7 @@ async def process_measurements(message: types.Message, state: FSMContext):
 
 @router.message(OrderForm.design_photos)
 async def process_design(message: types.Message, state: FSMContext):
+    if is_command(message): return
     if message.text in ["⏭ O'tkazib yuborish", "➡️ Davom etish"]:
         kb = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="10 kun"), KeyboardButton(text="15 kun")],[KeyboardButton(text="20 kun"), KeyboardButton(text="Aniqlanmagan")]], resize_keyboard=True)
         await message.answer("Qat'iy muddatni tanlang:", reply_markup=kb)
@@ -346,6 +361,7 @@ async def process_design(message: types.Message, state: FSMContext):
 
 @router.message(OrderForm.deadline)
 async def process_deadline(message: types.Message, state: FSMContext):
+    if is_command(message): return
     deadline = message.text
     if message.text == "Aniqlanmagan": deadline = "Neizvestno"
     await state.update_data(deadline=deadline)
@@ -369,6 +385,7 @@ def generate_order_id(region_code, cats_dict):
 
 @router.message(OrderForm.password)
 async def process_password(message: types.Message, state: FSMContext):
+    if is_command(message): return
     pwd = message.text
     if not supabase: return
     res = supabase.table("employees").select("*").eq("password", pwd).execute()
@@ -491,8 +508,9 @@ async def update_status_cb(callback: CallbackQuery):
         
     await callback.answer(f"Status yangilandi: {new_status}")
 
-@router.message(Command("buyurtmalar"))
-async def list_orders(message: types.Message):
+@cmd_router.message(Command("buyurtmalar"))
+async def list_orders(message: types.Message, state: FSMContext):
+    await state.clear()
     if not supabase: return
     res = supabase.table("orders").select("id, customer_name, status, deadline").neq("status", "Topshirilgan").execute()
     if not res.data:
@@ -524,7 +542,7 @@ async def view_order(message: types.Message):
     
     await message.answer(msg_text, reply_markup=status_kb, disable_web_page_preview=True)
 
-@router.message(Command("clear"))
+@cmd_router.message(Command("clear"))
 async def clear_data(message: types.Message):
     # Faqat shaxsiy chatda ishlaydi
     if message.chat.type != "private":
@@ -552,7 +570,10 @@ async def confirm_clear(callback: CallbackQuery):
         await callback.message.edit_text("🔄 Guruh postlari o'chirilmoqda...")
         
         # Avval guruhdagi postlarni o'chiramiz (buyurtma posti + rasm postlari)
-        orders = supabase.table("orders").select("group_message_id, group_media_msg_ids").execute()
+        try:
+            orders = supabase.table("orders").select("group_message_id, group_media_msg_ids").execute()
+        except Exception:
+            orders = supabase.table("orders").select("group_message_id").execute()
         deleted = 0
         failed = 0
         for o in orders.data:
@@ -588,7 +609,8 @@ async def cancel_clear(callback: CallbackQuery):
     await callback.message.edit_text("Bekor qilindi. Hech narsa o'chirilmadi.")
     await callback.answer()
 
-dp.include_router(router)
+dp.include_router(cmd_router)  # Buyruqlar birinchi tekshiriladi
+dp.include_router(router)      # FSM handlerlar ikkinchi
 
 @app.post("/api/webhook")
 async def webhook(request: Request):
