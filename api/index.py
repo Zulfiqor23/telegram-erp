@@ -540,10 +540,27 @@ async def confirm_clear(callback: CallbackQuery):
         await callback.answer("⛔ Huquq yo'q!", show_alert=True)
         return
     try:
+        await callback.message.edit_text("🔄 Guruh postlari o'chirilmoqda...")
+        
+        # Avval guruhdagi postlarni o'chiramiz
+        orders = supabase.table("orders").select("group_message_id").execute()
+        deleted = 0
+        failed = 0
+        for o in orders.data:
+            msg_id = o.get("group_message_id")
+            if msg_id:
+                try:
+                    await bot.delete_message(chat_id=GROUP_ID, message_id=msg_id)
+                    deleted += 1
+                except Exception:
+                    failed += 1
+        
+        # Keyin bazani tozalaymiz
         supabase.table("order_media").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
         supabase.table("orders").delete().neq("id", "---").execute()
         supabase.table("fsm_states").delete().neq("chat_id", 0).execute()
-        await callback.message.edit_text("🗑 Barcha buyurtmalar, rasmlar va FSM holatlari tozalandi!")
+        
+        await callback.message.edit_text(f"🗑 Tozalandi!\n\n📨 Guruhdan o'chirildi: {deleted} ta post\n⚠️ O'chirib bo'lmadi: {failed} ta\n🗄 Baza: buyurtmalar, rasmlar, FSM — hammasi tozalandi!")
     except Exception as e:
         await callback.message.edit_text(f"Xatolik: {e}")
     await callback.answer()
