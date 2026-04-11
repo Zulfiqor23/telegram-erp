@@ -18,16 +18,34 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8353264846:AAHlGhCK7z7iNG8cwOCt6Sff6gDEcr3VSvM")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-GROUP_ID = os.getenv("GROUP_ID", "-1003926147374")
-TOPIC_ORDER = os.getenv("TOPIC_ORDER", os.getenv("TOPIC_ASOSIY", ""))
-TOPIC_XONA = os.getenv("TOPIC_XONA", "")
-TOPIC_ZAMER = os.getenv("TOPIC_ZAMER", "")
-TOPIC_DIZAYN = os.getenv("TOPIC_DIZAYN", "")
-TOPIC_PRODUCTION = os.getenv("TOPIC_ISHLAB_CHIQARISH", "")
-TOPIC_DONE = os.getenv("TOPIC_DONE", "")
+GROUP_ID = os.getenv("GROUP_ID", "-1003682129136")
+
+# Topic IDlar — har bir bosqich uchun guruh ichidagi topic
+TOPIC_ORDER = os.getenv("TOPIC_ORDER", "2")       # Yangi buyurtmalar
+TOPIC_XONA = os.getenv("TOPIC_XONA", "3")         # Xona rasmlari
+TOPIC_ZAMER = os.getenv("TOPIC_ZAMER", "4")       # O'lchamlar
+TOPIC_DESIGN = os.getenv("TOPIC_DESIGN", "5")     # Dizayn rasmlari
+TOPIC_FACTORY = os.getenv("TOPIC_FACTORY", "6")   # Ishlab chiqarish
+TOPIC_INVENTARY = os.getenv("TOPIC_INVENTARY", "7")  # Inventar/Taminot
+TOPIC_ERRORS = os.getenv("TOPIC_ERRORS", "8")     # Xatoliklar
+TOPIC_SOP = os.getenv("TOPIC_SOP", "9")           # SOP — Standart operatsion protseduralar
+TOPIC_READY = os.getenv("TOPIC_READY", "10")      # Tayyor / Topshirilgan
+TOPIC_LOGISTICA = os.getenv("TOPIC_LOGISTICA", "11")  # Yetkazish / Logistika
+
+# Status → Topic mapping (har bir status o'zgarganda xabar qaysi topicga ketishi)
+STATUS_TOPIC_MAP = {
+    "Savatda": TOPIC_ORDER,
+    "Texnologda": TOPIC_SOP,
+    "Taminotchida": TOPIC_INVENTARY,
+    "Ishlab chiqarishda": TOPIC_FACTORY,
+    "Yetkazishda": TOPIC_LOGISTICA,
+    "O'rnatishda": TOPIC_LOGISTICA,
+    "Topshirilgan": TOPIC_READY,
+    "Xatolik sabab toxtab qolgan": TOPIC_ERRORS,
+}
 
 ADMIN_USERS = [6690357035]
 
@@ -455,7 +473,7 @@ async def process_password(message: types.Message, state: FSMContext):
 
     await send_group_to_topic(TOPIC_XONA, "xona", "XONA RASMLARI", sdata['xona'])
     await send_group_to_topic(TOPIC_ZAMER, "zamer", "O'LCHAMLAR (ZAMER)", sdata['zamer'])
-    await send_group_to_topic(TOPIC_DIZAYN, "dizayn", "DIZAYN NAMUNALARI", sdata['dizayn'])
+    await send_group_to_topic(TOPIC_DESIGN, "dizayn", "DIZAYN NAMUNALARI", sdata['dizayn'])
     
     # Rasm xabarlarining ID larini bazaga saqlaymiz
     if media_msg_ids:
@@ -505,6 +523,19 @@ async def update_status_cb(callback: CallbackQuery):
         if order.get("group_message_id"):
             await bot.edit_message_text(text=msg_text, chat_id=GROUP_ID, message_id=order["group_message_id"], reply_markup=status_kb, disable_web_page_preview=True)
     except Exception as e: pass
+    
+    # Yangi statusga mos topicga bildirishnoma yuboramiz
+    topic_id = STATUS_TOPIC_MAP.get(new_status)
+    if topic_id:
+        try:
+            notify_text = (f"📢 <b>Status yangilandi</b>\n\n"
+                           f"🆔 <code>{order_id}</code>\n"
+                           f"👤 {order.get('customer_name', '')}\n"
+                           f"📦 {new_status}\n"
+                           f"⏰ {timestamp_str}")
+            await bot.send_message(chat_id=GROUP_ID, message_thread_id=int(topic_id), text=notify_text)
+        except Exception:
+            pass
         
     await callback.answer(f"Status yangilandi: {new_status}")
 
